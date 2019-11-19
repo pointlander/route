@@ -6,9 +6,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"math/cmplx"
 	"math/rand"
+	"os"
 
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
@@ -40,6 +42,68 @@ func Factorial(n int) int {
 		return n * Factorial(n-1)
 	}
 	return 1
+}
+
+func printTable(out io.Writer, headers []string, rows [][]string) {
+	sizes := make([]int, len(headers))
+	for i, header := range headers {
+		sizes[i] = len(header)
+	}
+	for _, row := range rows {
+		for j, item := range row {
+			if length := len(item); length > sizes[j] {
+				sizes[j] = length
+			}
+		}
+	}
+
+	last := len(headers) - 1
+	fmt.Fprintf(out, "| ")
+	for i, header := range headers {
+		fmt.Fprintf(out, "%s", header)
+		spaces := sizes[i] - len(header)
+		for spaces > 0 {
+			fmt.Fprintf(out, " ")
+			spaces--
+		}
+		fmt.Fprintf(out, " |")
+		if i < last {
+			fmt.Fprintf(out, " ")
+		}
+	}
+	fmt.Fprintf(out, "\n| ")
+	for i, header := range headers {
+		dashes := len(header)
+		if sizes[i] > dashes {
+			dashes = sizes[i]
+		}
+		for dashes > 0 {
+			fmt.Fprintf(out, "-")
+			dashes--
+		}
+		fmt.Fprintf(out, " |")
+		if i < last {
+			fmt.Fprintf(out, " ")
+		}
+	}
+	fmt.Fprintf(out, "\n")
+	for _, row := range rows {
+		fmt.Fprintf(out, "| ")
+		last := len(row) - 1
+		for i, entry := range row {
+			spaces := sizes[i] - len(entry)
+			fmt.Fprintf(out, "%s", entry)
+			for spaces > 0 {
+				fmt.Fprintf(out, " ")
+				spaces--
+			}
+			fmt.Fprintf(out, " |")
+			if i < last {
+				fmt.Fprintf(out, " ")
+			}
+		}
+		fmt.Fprintf(out, "\n")
+	}
 }
 
 func main() {
@@ -187,4 +251,40 @@ func main() {
 	}
 	plot("cost abs vs epochs", "cost_abs.png", pointsAbs)
 	plot("cost phase vs epochs", "cost_phase.png", pointsPhase)
+
+	readme, err := os.Create("README.md")
+	if err != nil {
+		panic(err)
+	}
+	defer readme.Close()
+
+	{
+		input := tc128.NewV(Width)
+		l0 := tc128.Sigmoid(tc128.Add(tc128.Mul(w0.Meta(), input.Meta()), b0.Meta()))
+
+		headers, rows := make([]string, 0, 1+2*Middle), make([][]string, 0, length)
+		headers = append(headers, "label")
+		for i := 0; i < Middle; i++ {
+			headers = append(headers, fmt.Sprintf("abs %d", i))
+			headers = append(headers, fmt.Sprintf("phase %d", i))
+		}
+		for _, item := range items {
+			inputs := make([]complex128, Width)
+			for j, measure := range item.Measures {
+				inputs[j] = cmplx.Rect(measure, float64(j)*math.Pi/2)
+			}
+			input.Set(inputs)
+			row := make([]string, 0, 1+2*Middle)
+			l0(func(a *tc128.V) bool {
+				row = append(row, item.Label)
+				for _, value := range a.X {
+					row = append(row, fmt.Sprintf("%f", cmplx.Abs(value)))
+					row = append(row, fmt.Sprintf("%f", cmplx.Phase(value)))
+				}
+				return true
+			})
+			rows = append(rows, row)
+		}
+		printTable(readme, headers, rows)
+	}
 }
