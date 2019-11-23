@@ -33,7 +33,8 @@ const (
 // Pair is a pair of training dtaa
 type Pair struct {
 	iris.Iris
-	Input, Output []complex128
+	Input  [][]complex128
+	Output []complex128
 }
 
 // Factorial computes the factorial of a number
@@ -114,7 +115,7 @@ func main() {
 
 	items, n := datum.Fisher, Factorial(Width)
 	length := n * len(items)
-	pairs := make([]Pair, 0, length)
+	pairs := make([]Pair, 0, len(items))
 	for _, item := range items {
 		permutations := make([][]complex128, 0, n)
 		c, i, a := make([]int, Width), 0, make([]complex128, Width)
@@ -146,20 +147,21 @@ func main() {
 			i++
 		}
 
-		output := permutations[0]
-		for _, input := range permutations {
-			pair := Pair{
-				Iris:   item,
-				Input:  input,
-				Output: output,
-			}
-			pairs = append(pairs, pair)
+		pair := Pair{
+			Iris:   item,
+			Input:  permutations,
+			Output: permutations[0],
 		}
+		pairs = append(pairs, pair)
 	}
-	if len(pairs) != length {
+	count := 0
+	for _, pair := range pairs {
+		count += len(pair.Input)
+	}
+	if count != length {
 		panic("invalid length")
 	}
-	fmt.Println("pairs", len(pairs))
+	fmt.Println("pairs", count)
 
 	rnd := rand.New(rand.NewSource(1))
 	random128 := func(a, b float64) complex128 {
@@ -183,8 +185,10 @@ func main() {
 
 	inputs, outputs := make([]complex128, 0, Width*length), make([]complex128, 0, Width*length)
 	for _, pair := range pairs {
-		inputs = append(inputs, pair.Input...)
-		outputs = append(outputs, pair.Output...)
+		for _, in := range pair.Input {
+			inputs = append(inputs, in...)
+			outputs = append(outputs, pair.Output...)
+		}
 	}
 	input.Set(inputs)
 	output.Set(outputs)
@@ -268,15 +272,15 @@ func main() {
 			headers = append(headers, fmt.Sprintf("abs %d", i))
 			headers = append(headers, fmt.Sprintf("phase %d", i))
 		}
-		for _, item := range items {
+		for _, pair := range pairs {
 			inputs := make([]complex128, Width)
-			for j, measure := range item.Measures {
-				inputs[j] = cmplx.Rect(measure, float64(j)*math.Pi/2)
+			for j, in := range pair.Output {
+				inputs[j] = in
 			}
 			input.Set(inputs)
 			row := make([]string, 0, 1+2*Middle)
 			l0(func(a *tc128.V) bool {
-				row = append(row, item.Label)
+				row = append(row, pair.Label)
 				for _, value := range a.X {
 					row = append(row, fmt.Sprintf("%f", cmplx.Abs(value)))
 					row = append(row, fmt.Sprintf("%f", cmplx.Phase(value)))
