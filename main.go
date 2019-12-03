@@ -5,6 +5,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -107,7 +108,15 @@ func printTable(out io.Writer, headers []string, rows [][]string) {
 	}
 }
 
+var options = struct {
+	Symmetry *bool
+}{
+	Symmetry: flag.Bool("symmetry", false, "fully symmetric network"),
+}
+
 func main() {
+	flag.Parse()
+
 	datum, err := iris.Load()
 	if err != nil {
 		panic(err)
@@ -170,28 +179,71 @@ func main() {
 
 	parameters := make([]*tc128.V, 0, 4)
 	w0, b0 := tc128.NewV(Width, Middle), tc128.NewV(Middle)
-	w1, b1 := tc128.NewV(Middle, Width), tc128.NewV(Width)
-	parameters = append(parameters, &w0, &b0, &w1, &b1)
+	parameters = append(parameters, &w0, &b0)
+	w1, b1 := make([]tc128.V, n), make([]tc128.V, n)
+	for i := range w1 {
+		w1[i] = tc128.NewV(Middle, Width)
+		parameters = append(parameters, &w1[i])
+	}
+	for i := range b1 {
+		b1[i] = tc128.NewV(Width)
+		parameters = append(parameters, &b1[i])
+	}
 	for _, p := range parameters {
 		for i := 0; i < cap(p.X); i++ {
 			p.X = append(p.X, random128(-1, 1))
 		}
 	}
 
-	input, output := tc128.NewV(Width, length), tc128.NewV(Width, length)
-	l0 := tc128.Sigmoid(tc128.Add(tc128.Mul(w0.Meta(), input.Meta()), b0.Meta()))
-	l1 := tc128.Add(tc128.Mul(w1.Meta(), l0), b1.Meta())
-	cost := tc128.Avg(tc128.Quadratic(l1, output.Meta()))
-
-	inputs, outputs := make([]complex128, 0, Width*length), make([]complex128, 0, Width*length)
-	for _, pair := range pairs {
-		for _, in := range pair.Input {
-			inputs = append(inputs, in...)
-			outputs = append(outputs, pair.Output...)
-		}
+	input, output := tc128.NewV(Width, length), make([]*tc128.V, n)
+	for i := range output {
+		out := tc128.NewV(Width, length)
+		output[i] = &out
 	}
-	input.Set(inputs)
-	output.Set(outputs)
+	l0 := tc128.Sigmoid(tc128.Add(tc128.Mul(w0.Meta(), input.Meta()), b0.Meta()))
+	l1 := make([]tc128.Meta, n)
+	var cost tc128.Meta
+	if *options.Symmetry {
+		for i := range l1 {
+			l1[i] = tc128.Add(tc128.Mul(w1[i].Meta(), l0), b1[i].Meta())
+			if cost == nil {
+				cost = tc128.Avg(tc128.Quadratic(l1[i], output[i].Meta()))
+			} else {
+				cost = tc128.Add(cost, tc128.Avg(tc128.Quadratic(l1[i], output[i].Meta())))
+			}
+		}
+	} else {
+		l1[0] = tc128.Add(tc128.Mul(w1[0].Meta(), l0), b1[0].Meta())
+		cost = tc128.Avg(tc128.Quadratic(l1[0], output[0].Meta()))
+	}
+
+	inputs, outputs := make([]complex128, 0, Width*length), make([][]complex128, n)
+	for i := range outputs {
+		outputs[i] = make([]complex128, 0, Width*length)
+	}
+	if *options.Symmetry {
+		for _, pair := range pairs {
+			for _, in := range pair.Input {
+				inputs = append(inputs, in...)
+				for i, out := range pair.Input {
+					outputs[i] = append(outputs[i], out...)
+				}
+			}
+		}
+		input.Set(inputs)
+		for i, out := range outputs {
+			output[i].Set(out)
+		}
+	} else {
+		for _, pair := range pairs {
+			for _, in := range pair.Input {
+				inputs = append(inputs, in...)
+				outputs[0] = append(outputs[0], pair.Output...)
+			}
+		}
+		input.Set(inputs)
+		output[0].Set(outputs[0])
+	}
 
 	iterations := 256
 	pointsAbs, pointsPhase := make(plotter.XYs, 0, iterations), make(plotter.XYs, 0, iterations)
@@ -200,7 +252,9 @@ func main() {
 			p.Zero()
 		}
 		input.Zero()
-		output.Zero()
+		for i := range output {
+			output[i].Zero()
+		}
 
 		total := tc128.Gradient(cost).X[0]
 
